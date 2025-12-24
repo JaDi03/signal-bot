@@ -3,6 +3,11 @@ const TechnicalIndicators = require('technicalindicators');
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 
+// Market structure analysis modules
+const LiquidityAnalyzer = require('./liquidity_analyzer');
+const OrderBlockDetector = require('./orderblock_detector');
+const GapAnalyzer = require('./gap_analyzer');
+
 // Configuration
 const config = {
   exchange: 'binance',
@@ -339,6 +344,143 @@ function generateBreakoutSignal(ind) {
   return signals;
 }
 
+// Calculate dynamic Take Profit based on market structure
+function calculateDynamicTP(signalType, currentPrice, atr, liquidityMap, orderBlocks, gaps) {
+  const targets = [];
+
+  if (signalType === 'LONG') {
+    // Collect potential targets above current price
+    liquidityMap.above.forEach(zone => {
+      targets.push({ price: zone.price, strength: zone.strength, type: 'liquidity' });
+    });
+
+    orderBlocks.bearish.forEach(block => {
+      const blockPrice = (block.top + block.bottom) / 2;
+      targets.push({ price: blockPrice, strength: block.strength, type: 'orderblock' });
+    });
+
+    gaps.bearish.forEach(gap => {
+      const gapPrice = (gap.top + gap.bottom) / 2;
+      targets.push({ price: gapPrice, strength: gap.strength, type: 'gap' });
+    });
+  } else {
+    // Collect potential targets below current price
+    liquidityMap.below.forEach(zone => {
+      targets.push({ price: zone.price, strength: zone.strength, type: 'liquidity' });
+    });
+
+    orderBlocks.bullish.forEach(block => {
+      const blockPrice = (block.top + block.bottom) / 2;
+      targets.push({ price: blockPrice, strength: block.strength, type: 'orderblock' });
+    });
+
+    gaps.bullish.forEach(gap => {
+      const gapPrice = (gap.top + gap.bottom) / 2;
+      targets.push({ price: gapPrice, strength: gap.strength, type: 'gap' });
+    });
+  }
+
+  // Filter targets by distance (min 1%, max 10%)
+  const minDistance = currentPrice * 0.01;
+  const maxDistance = currentPrice * 0.10;
+
+  const validTargets = targets.filter(t => {
+    const dist = Math.abs(t.price - currentPrice);
+    return dist >= minDistance && dist <= maxDistance;
+  });
+
+  if (validTargets.length === 0) {
+    // Fallback to ATR-based TP
+    return signalType === 'LONG'
+      ? currentPrice + (atr * 3.0)
+      : currentPrice - (atr * 3.0);
+  }
+
+  // Score targets by strength/distance ratio
+  validTargets.forEach(t => {
+    const dist = Math.abs(t.price - currentPrice);
+    t.score = t.strength / (dist / currentPrice * 100); // Strength per % distance
+  });
+
+  // Sort by score and select best
+  validTargets.sort((a, b) => b.score - a.score);
+  const bestTarget = validTargets[0];
+
+  console.log(`[DEBUG] TP target: ${bestTarget.type} at $${bestTarget.price.toFixed(2)} (strength: ${bestTarget.strength.toFixed(0)})`);
+
+  return bestTarget.price;
+}
+
+// Calculate dynamic Stop Loss based on market structure
+function calculateDynamicSL(signalType, currentPrice, atr, liquidityMap, orderBlocks, gaps) {
+  const invalidationPoints = [];
+
+  if (signalType === 'LONG') {
+    // Find structure below entry for SL placement
+    liquidityMap.below.forEach(zone => {
+      invalidationPoints.push({ price: zone.price, strength: zone.strength, type: 'liquidity' });
+    });
+
+    orderBlocks.bullish.forEach(block => {
+      // Place SL below order block
+      invalidationPoints.push({ price: block.low, strength: block.strength, type: 'orderblock' });
+    });
+  } else {
+    // Find structure above entry for SL placement
+    liquidityMap.above.forEach(zone => {
+      invalidationPoints.push({ price: zone.price, strength: zone.strength, type: 'liquidity' });
+    });
+
+    orderBlocks.bearish.forEach(block => {
+      // Place SL above order block
+      invalidationPoints.push({ price: block.high, strength: block.strength, type: 'orderblock' });
+    });
+  }
+
+  if (invalidationPoints.length === 0) {
+    // Fallback to ATR-based SL
+    return signalType === 'LONG'
+      ? currentPrice - (atr * 1.5)
+      : currentPrice + (atr * 1.5);
+  }
+
+  // Find nearest strong structure
+  invalidationPoints.sort((a, b) => {
+    const distA = Math.abs(a.price - currentPrice);
+    const distB = Math.abs(b.price - currentPrice);
+    return distA - distB;
+  });
+
+  const nearest = invalidationPoints[0];
+
+  // Add buffer beyond structure (0.3% to avoid exact level)
+  const buffer = currentPrice * 0.003;
+  const slPrice = signalType === 'LONG'
+    ? nearest.price - buffer
+    : nearest.price + buffer;
+
+  // Validate SL is not too tight (min 0.5%) or too wide (max 3%)
+  const slPercent = Math.abs((slPrice - currentPrice) / currentPrice * 100);
+
+  if (slPercent < 0.5) {
+    // Too tight, use minimum
+    return signalType === 'LONG'
+      ? currentPrice * 0.995
+      : currentPrice * 1.005;
+  }
+
+  if (slPercent > 3) {
+    // Too wide, cap at 3%
+    return signalType === 'LONG'
+      ? currentPrice * 0.97
+      : currentPrice * 1.03;
+  }
+
+  console.log(`[DEBUG] SL: ${nearest.type} at $${slPrice.toFixed(2)} (${slPercent.toFixed(2)}%)`);
+
+  return slPrice;
+}
+
 // Generate trading signal with scoring system
 async function generateSignal(candles, symbol) {
   console.log(`[DEBUG] Generating signal for ${symbol}`);
@@ -448,21 +590,54 @@ async function generateSignal(candles, symbol) {
     return null;
   }
 
-  // Calculate dynamic TP/SL based on ATR
+  // Analyze market structure for dynamic TP/SL
   const price = ind.close;
   const atr = ind.atr;
-  let sl, tp, slPercent, tpPercent;
+
+  console.log('[DEBUG] Analyzing market structure...');
+  const liquidityMap = new LiquidityAnalyzer(candles, price).analyze();
+  const orderBlocks = new OrderBlockDetector(candles, price).detect();
+  const gaps = new GapAnalyzer(candles, price).detect();
+
+  // Calculate dynamic TP based on market structure
+  const tp = calculateDynamicTP(signalType, price, atr, liquidityMap, orderBlocks, gaps);
+
+  // Calculate dynamic SL based on market structure
+  const sl = calculateDynamicSL(signalType, price, atr, liquidityMap, orderBlocks, gaps);
+
+  // Calculate percentages
+  let slPercent, tpPercent, riskReward;
 
   if (signalType === 'LONG') {
-    sl = price - (atr * 1.5);
-    tp = price + (atr * 3.0);
     slPercent = ((price - sl) / price * 100);
     tpPercent = ((tp - price) / price * 100);
+    riskReward = tpPercent / slPercent;
   } else {
-    sl = price + (atr * 1.5);
-    tp = price - (atr * 3.0);
     slPercent = ((sl - price) / price * 100);
     tpPercent = ((price - tp) / price * 100);
+    riskReward = tpPercent / slPercent;
+  }
+
+  // Validate risk:reward ratio (minimum 1:1.5)
+  if (riskReward < 1.5) {
+    console.log(`[DEBUG] Risk:Reward too low: 1:${riskReward.toFixed(2)}`);
+    return null;
+  }
+
+  // Add structure-based bonuses to score
+  if (orderBlocks.nearest && orderBlocks.nearest.strength > 50) {
+    finalScore += 15;
+    reasons.push(`✓ Strong order block (${orderBlocks.nearest.strength.toFixed(0)})`);
+  }
+
+  if (liquidityMap.nearest && liquidityMap.nearest.strength > 50) {
+    finalScore += 10;
+    reasons.push(`✓ Liquidity zone detected`);
+  }
+
+  if (gaps.nearest && gaps.nearest.strength > 50) {
+    finalScore += 10;
+    reasons.push(`✓ Fair value gap (${gaps.nearest.sizePercent.toFixed(1)}%)`);
   }
 
   const positionSize = 100;
