@@ -1,0 +1,32 @@
+# Environment variables
+node_modules/
+.env
+.env.local
+
+# Logs and data
+signals_log.csv
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Backups
+*.backup
+*.bak
+
+# Python (if any)
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+Include/
+Lib/
+Scripts/
+pyvenv.cfg

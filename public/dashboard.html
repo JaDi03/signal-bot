@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Bot Dashboard</title>
+    <link rel="stylesheet" href="dashboard.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>📊 Trading Bot Dashboard</h1>
+            <div class="last-update">Última actualización: <span id="lastUpdate">--</span></div>
+        </header>
+
+        <!-- Métricas Principales -->
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-icon">📈</div>
+                <div class="metric-content">
+                    <div class="metric-label">Win Rate</div>
+                    <div class="metric-value" id="winRate">--%</div>
+                </div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-icon">💰</div>
+                <div class="metric-content">
+                    <div class="metric-label">PnL Total</div>
+                    <div class="metric-value" id="totalPnL">$0.00</div>
+                </div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-icon">🎯</div>
+                <div class="metric-content">
+                    <div class="metric-label">Profit Factor</div>
+                    <div class="metric-value" id="profitFactor">0.00</div>
+                </div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-icon">📊</div>
+                <div class="metric-content">
+                    <div class="metric-label">Operaciones</div>
+                    <div class="metric-value" id="totalTrades">0</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Señales Activas -->
+        <section class="section">
+            <h2>🟡 Señales Activas</h2>
+            <div class="table-container">
+                <table id="activeSignalsTable">
+                    <thead>
+                        <tr>
+                            <th>Símbolo</th>
+                            <th>Tipo</th>
+                            <th>Estrategia</th>
+                            <th>Entry</th>
+                            <th>TP</th>
+                            <th>SL</th>
+                            <th>Score</th>
+                            <th>PnL Flotante</th>
+                            <th>Tiempo</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activeSignalsBody">
+                        <tr>
+                            <td colspan="9" class="no-data">No hay señales activas</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Gráficos -->
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h3>Curva de Equity</h3>
+                <canvas id="equityChart"></canvas>
+            </div>
+            
+            <div class="chart-card">
+                <h3>Win Rate por Símbolo</h3>
+                <canvas id="symbolChart"></canvas>
+            </div>
+            
+            <div class="chart-card">
+                <h3>Win Rate por Estrategia</h3>
+                <canvas id="strategyChart"></canvas>
+            </div>
+            
+            <div class="chart-card">
+                <h3>Distribución de PnL</h3>
+                <canvas id="pnlDistChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Filtros -->
+        <section class="section">
+            <div class="filters">
+                <h2>🔍 Historial de Señales</h2>
+                <div class="filter-controls">
+                    <input type="text" id="searchInput" placeholder="Buscar por símbolo...">
+                    <select id="statusFilter">
+                        <option value="">Todos los estados</option>
+                        <option value="OPEN">Abiertas</option>
+                        <option value="TP_HIT">TP Alcanzado</option>
+                        <option value="SL_HIT">SL Alcanzado</option>
+                    </select>
+                    <select id="signalTypeFilter">
+                        <option value="">Todos los tipos</option>
+                        <option value="LONG">LONG</option>
+                        <option value="SHORT">SHORT</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <table id="signalsTable">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Símbolo</th>
+                            <th>Tipo</th>
+                            <th>Estrategia</th>
+                            <th>Régimen</th>
+                            <th>Entry</th>
+                            <th>Exit</th>
+                            <th>PnL %</th>
+                            <th>PnL USDT</th>
+                            <th>Score</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="signalsBody">
+                        <tr>
+                            <td colspan="11" class="no-data">Cargando señales...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>
