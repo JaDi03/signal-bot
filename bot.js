@@ -8,7 +8,6 @@ const LiquidityAnalyzer = require('./liquidity_analyzer');
 const OrderBlockDetector = require('./orderblock_detector');
 const GapAnalyzer = require('./gap_analyzer');
 const NewsAnalyzer = require('./news_analyzer');
-const supabase = require('./supabase_client');
 
 // Configuration
 const config = {

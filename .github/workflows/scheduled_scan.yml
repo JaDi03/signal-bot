@@ -12,7 +12,6 @@ jobs:
     steps:
       - name: Trigger Bot Scan Endpoint
         run: |
-          # Reemplaza la URL con tu URL real de Vercel después del despliegue
-          # El secreto CRON_SECRET debe configurarse en los Settings de GitHub del repositorio
-          curl -X GET "https://signal-bot-nine.vercel.app/api/scan" \
+          # Activación periódica del bot en Vercel
+          curl -X GET "https://signal-bot-ebon.vercel.app/api/scan" \
           -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
