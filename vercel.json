@@ -1,26 +1,14 @@
 {
     "version": 2,
-    "builds": [
+    "cleanUrls": true,
+    "rewrites": [
         {
-            "src": "server.js",
-            "use": "@vercel/node"
+            "source": "/",
+            "destination": "/dashboard.html"
         },
         {
-            "src": "api/*.js",
-            "use": "@vercel/node"
+            "source": "/api/signals/active",
+            "destination": "/api/active"
         }
-    ],
-    "routes": [
-        {
-            "src": "/api/(.*)",
-            "dest": "api/$1.js"
-        },
-        {
-            "src": "/(.*)",
-            "dest": "server.js"
-        }
-    ],
-    "env": {
-        "NODE_ENV": "production"
-    }
+    ]
 }
