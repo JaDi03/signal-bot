@@ -1,5 +1,6 @@
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const path = require('path');
+const net = require('net');
 
 // ============================================
 // CONFIGURACIÓN
@@ -71,17 +72,26 @@ function cleanup() {
 
     processes.forEach(({ name, proc }) => {
         try {
-            proc.kill('SIGTERM');
-            log(name, colors.yellow, 'Detenido');
+            if (process.platform === 'win32') {
+                // En Windows, taskkill /F /T cierra el proceso y todos sus hijos
+                exec(`taskkill /F /T /PID ${proc.pid}`, (err) => {
+                    if (err) log(name, colors.red, `Error al usar taskkill: ${err.message}`);
+                    else log(name, colors.yellow, 'Detenido forzosamente (OK)');
+                });
+            } else {
+                proc.kill('SIGTERM');
+                log(name, colors.yellow, 'Detenido');
+            }
         } catch (err) {
             log(name, colors.red, `Error al detener: ${err.message}`);
         }
     });
 
+    // Pequeña espera para asegurar que los procesos se cierren
     setTimeout(() => {
         log('MAIN', colors.green, '¡Hasta luego!');
         process.exit(0);
-    }, 1000);
+    }, 1500);
 }
 
 process.on('SIGINT', cleanup);

@@ -7,6 +7,9 @@ const fs = require('fs');
 const LiquidityAnalyzer = require('./liquidity_analyzer');
 const OrderBlockDetector = require('./orderblock_detector');
 const GapAnalyzer = require('./gap_analyzer');
+const NewsAnalyzer = require('./news_analyzer');
+const supabase = require('./supabase_client');
+const supabase = require('./supabase_client');
 
 // Configuration
 const config = {
@@ -20,7 +23,7 @@ const config = {
     'XRP/USDT',
     'ADA/USDT',
     'DOGE/USDT',
-    'MATIC/USDT',
+    'POL/USDT',
     'LTC/USDT',
     'LINK/USDT',
   ],
@@ -38,6 +41,7 @@ const config = {
 
 const exchange = new ccxt.binance({ enableRateLimit: true });
 const bot = new TelegramBot(config.telegramToken, { polling: false });
+const newsAnalyzer = new NewsAnalyzer();
 const lastSignals = {};
 
 // Initialize CSV with headers
@@ -49,6 +53,185 @@ if (!fs.existsSync(config.logFile)) {
 // Utility: Sleep function for delays
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Utility: Check if there's already an open position for a symbol
+function isPositionOpen(symbol) {
+  try {
+    if (!fs.existsSync(config.logFile)) return false;
+    const content = fs.readFileSync(config.logFile, 'utf-8');
+    const lines = content.trim().split('\n');
+    if (lines.length <= 1) return false;
+
+    const headers = lines[0].split(',');
+    const statusIdx = headers.indexOf('Status');
+    const symbolIdx = headers.indexOf('Symbol');
+
+    if (statusIdx === -1 || symbolIdx === -1) return false;
+
+    // Check last 20 signals (arbitrary depth to find open positions)
+    const recentLines = lines.slice(-20);
+    return recentLines.some(line => {
+      const values = line.split(',');
+      return values[symbolIdx] === symbol && values[statusIdx] === 'OPEN';
+    });
+  } catch (err) {
+    console.error(`[ERROR] isPositionOpen ${symbol}:`, err.message);
+    return false;
+  }
+}
+
+// Utility: Check if there's already an open position for a symbol (Local CSV)
+function isPositionOpenLocal(symbol) {
+  try {
+    if (!fs.existsSync(config.logFile)) return false;
+    const content = fs.readFileSync(config.logFile, 'utf-8');
+    const lines = content.trim().split('\n');
+    if (lines.length <= 1) return false;
+
+    const headers = lines[0].split(',');
+    const statusIdx = headers.indexOf('Status');
+    const symbolIdx = headers.indexOf('Symbol');
+
+    if (statusIdx === -1 || symbolIdx === -1) return false;
+
+    // Check last 20 signals (arbitrary depth to find open positions)
+    const recentLines = lines.slice(-20);
+    return recentLines.some(line => {
+      const values = line.split(',');
+      return values[symbolIdx] === symbol && values[statusIdx] === 'OPEN';
+    });
+  } catch (err) {
+    console.error(`[ERROR] isPositionOpenLocal ${symbol}:`, err.message);
+    return false;
+  }
+}
+
+/**
+ * NEW: Supabase Integration Functions
+ */
+
+async function isPositionOpenSupabase(symbol) {
+  try {
+    const { data, error } = await supabase
+      .from('signals')
+      .select('status')
+      .eq('symbol', symbol)
+      .eq('status', 'OPEN');
+
+    if (error) throw error;
+    return data && data.length > 0;
+  } catch (err) {
+    console.error(`[ERROR] isPositionOpenSupabase ${symbol}:`, err.message);
+    return false;
+  }
+}
+
+async function saveSignalSupabase(signal, symbol) {
+  try {
+    const { error } = await supabase
+      .from('signals')
+      .insert([{
+        symbol: symbol,
+        signal_type: signal.type,
+        regime: signal.regime,
+        strategy: signal.strategy,
+        entry_price: signal.price,
+        sl_price: signal.sl,
+        tp_price: signal.tp,
+        status: 'OPEN',
+        score: signal.score,
+        atr: signal.atr,
+        reasons: signal.reasons,
+        timeframe: config.timeframe
+      }]);
+
+    if (error) throw error;
+    console.log(`[SUCCESS] Signal for ${symbol} saved to Supabase`);
+    return true;
+  } catch (err) {
+    console.error(`[ERROR] saveSignalSupabase ${symbol}:`, err.message);
+    return false;
+  }
+}
+
+async function updateOpenPositionsSupabase() {
+  try {
+    console.log('[DEBUG] Checking open positions in Supabase...');
+    const { data: openSignals, error } = await supabase
+      .from('signals')
+      .select('*')
+      .eq('status', 'OPEN');
+
+    if (error) throw error;
+    if (!openSignals || openSignals.length === 0) return;
+
+    for (const signal of openSignals) {
+      try {
+        const ticker = await exchange.fetchTicker(signal.symbol);
+        const currentPrice = ticker.last;
+        const entryPrice = parseFloat(signal.entry_price);
+        const tp = parseFloat(signal.tp_price);
+        const sl = parseFloat(signal.sl_price);
+
+        let newStatus = 'OPEN';
+        let exitPrice = null;
+
+        if (signal.signal_type === 'LONG') {
+          if (currentPrice >= tp) {
+            newStatus = 'TP_HIT';
+            exitPrice = tp;
+          } else if (currentPrice <= sl) {
+            newStatus = 'SL_HIT';
+            exitPrice = sl;
+          }
+        } else { // SHORT
+          if (currentPrice <= tp) {
+            newStatus = 'TP_HIT';
+            exitPrice = tp;
+          } else if (currentPrice >= sl) {
+            newStatus = 'SL_HIT';
+            exitPrice = sl;
+          }
+        }
+
+        if (newStatus !== 'OPEN') {
+          const pnlPercent = signal.signal_type === 'LONG'
+            ? ((exitPrice - entryPrice) / entryPrice) * 100
+            : ((entryPrice - exitPrice) / entryPrice) * 100;
+
+          const pnlUsdt = 100 * (pnlPercent / 100);
+
+          const { error: updateError } = await supabase
+            .from('signals')
+            .update({
+              status: newStatus,
+              exit_price: exitPrice,
+              exit_time: new Date().toISOString(),
+              pnl_percent: pnlPercent,
+              pnl_usdt: pnlUsdt
+            })
+            .eq('id', signal.id);
+
+          if (updateError) throw updateError;
+          console.log(`[CLOSED] ${signal.symbol} ${newStatus} at ${exitPrice} (PnL: ${pnlPercent.toFixed(2)}%)`);
+        }
+      } catch (tickerErr) {
+        console.error(`[ERROR] updateOpenPosition for ${signal.symbol}:`, tickerErr.message);
+      }
+    }
+  } catch (err) {
+    console.error('[ERROR] updateOpenPositionsSupabase:', err.message);
+  }
+}
+
+// Utility: Format price with dynamic precision based on value
+function formatPrice(price) {
+  const p = parseFloat(price);
+  if (isNaN(p)) return 'N/A';
+  if (p < 1) return p.toFixed(4);
+  if (p < 10) return p.toFixed(3);
+  return p.toFixed(2);
 }
 
 // Fetch OHLCV data with retry mechanism
@@ -482,7 +665,7 @@ function calculateDynamicSL(signalType, currentPrice, atr, liquidityMap, orderBl
 }
 
 // Generate trading signal with scoring system
-async function generateSignal(candles, symbol) {
+async function generateSignal(candles, symbol, sentimentData) {
   console.log(`[DEBUG] Generating signal for ${symbol}`);
 
   if (!candles || candles.length === 0) return null;
@@ -584,6 +767,16 @@ async function generateSignal(candles, symbol) {
     }
   }
 
+  // Add sentiment-based bonuses
+  if (sentimentData && signalType) {
+    const sentimentBonus = newsAnalyzer.getSentimentBonus(signalType, sentimentData.fearGreed, sentimentData.newsSentiment);
+    if (sentimentBonus !== 0) {
+      finalScore += sentimentBonus;
+      const type = sentimentBonus > 0 ? '✓' : '⚠';
+      reasons.push(`${type} Market sentiment alignment: ${sentimentBonus > 0 ? '+' : ''}${sentimentBonus} pts`);
+    }
+  }
+
   // Filter low-quality signals
   if (finalScore < config.minSignalScore) {
     console.log(`[DEBUG] Score too low: ${finalScore} < ${config.minSignalScore}`);
@@ -644,14 +837,17 @@ async function generateSignal(candles, symbol) {
 
   // Format Telegram message
   const emoji = signalType === 'LONG' ? '🟢' : '🔴';
+  const sentimentDesc = sentimentData ? newsAnalyzer.getSentimentDescription(sentimentData.fearGreed, sentimentData.newsSentiment) : '';
+
   const message = `${emoji} **SIGNAL ${strategyName} - ${signalType}**\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
-    `📊 ${symbol} @ $${price.toFixed(2)}\n` +
+    `📊 ${symbol} @ $${formatPrice(price)}\n` +
     `🔥 Score: ${finalScore.toFixed(0)}/100\n` +
-    `📈 Regime: ${regime.regime}\n\n` +
-    `💰 Entry: $${price.toFixed(2)}\n` +
-    `🛡️ SL: $${sl.toFixed(2)} (-${slPercent.toFixed(1)}%)\n` +
-    `🎯 TP: $${tp.toFixed(2)} (+${tpPercent.toFixed(1)}%)\n` +
+    `📈 Regime: ${regime.regime}\n` +
+    `${sentimentDesc}\n\n` +
+    `💰 Entry: $${formatPrice(price)}\n` +
+    `🛡️ SL: $${formatPrice(sl)} (-${slPercent.toFixed(1)}%)\n` +
+    `🎯 TP: $${formatPrice(tp)} (+${tpPercent.toFixed(1)}%)\n` +
     `💵 Size: $${positionSize.toFixed(0)} USDT\n\n` +
     `📋 Reasons:\n${reasons.join('\n')}\n\n` +
     `⏰ ${new Date().toLocaleString()}`;
@@ -677,16 +873,44 @@ async function generateSignal(candles, symbol) {
 // Main function: Check all symbols for signals
 async function checkSignals() {
   console.log('[DEBUG] Starting checkSignals');
+
+  // NEW: Update existing open positions first (Serverless friendly)
+  if (process.env.SUPABASE_URL) {
+    await updateOpenPositionsSupabase();
+  }
+
+  // Fetch market sentiment
+  const sentimentData = await newsAnalyzer.analyze();
+
+  if (sentimentData.shouldPauseTrading) {
+    console.log('[WARNING] Trading paused due to extreme market sentiment or bearish news.');
+    return;
+  }
+
   for (const symbol of config.symbols) {
     try {
       console.log(`\n[DEBUG] Processing ${symbol}`);
+
+      // NEW: Check if position is already open to avoid duplicates
+      // Check both Local (if running local) and Supabase (if configured)
+      const isLocalOpen = isPositionOpenLocal(symbol);
+      let isSupabaseOpen = false;
+      if (process.env.SUPABASE_URL) {
+        isSupabaseOpen = await isPositionOpenSupabase(symbol);
+      }
+
+      if (isLocalOpen || isSupabaseOpen) {
+        console.log(`[INFO] Position already open for ${symbol} (Local: ${isLocalOpen}, Supa: ${isSupabaseOpen}), skipping...`);
+        continue;
+      }
+
       const candles = await getOHLCV(symbol);
       if (candles.length === 0) {
         console.log(`[WARN] No candles for ${symbol}, skipping`);
         continue;
       }
 
-      const signal = await generateSignal(candles, symbol);
+      const signal = await generateSignal(candles, symbol, sentimentData);
 
       if (signal) {
         console.log(`[DEBUG] Signal detected for ${symbol}: ${signal.type}`);
@@ -709,9 +933,14 @@ async function checkSignals() {
 
             // Save to CSV
             const timestamp = new Date().toISOString();
-            const entry = `${timestamp},${symbol},${signal.type},${signal.regime},${signal.strategy},${signal.price.toFixed(2)},${signal.sl.toFixed(2)},${signal.tp.toFixed(2)},${signal.positionSize.toFixed(2)},OPEN,,,,,${signal.score.toFixed(0)},${signal.atr.toFixed(2)},"${signal.reasons}",${config.timeframe}\n`;
+            const entry = `${timestamp},${symbol},${signal.type},${signal.regime},${signal.strategy},${formatPrice(signal.price)},${formatPrice(signal.sl)},${formatPrice(signal.tp)},${signal.positionSize.toFixed(2)},OPEN,,,,,${signal.score.toFixed(0)},${signal.atr.toFixed(2)},"${signal.reasons}",${config.timeframe}\n`;
             fs.appendFileSync(config.logFile, entry);
             console.log(`[SUCCESS] Saved to ${config.logFile}`);
+
+            // NEW: Save to Supabase
+            if (process.env.SUPABASE_URL) {
+              await saveSignalSupabase(signal, symbol);
+            }
 
             lastSignals[signalKey] = signal.type;
           } catch (err) {
@@ -731,15 +960,30 @@ async function checkSignals() {
   console.log('[DEBUG] checkSignals finished\n');
 }
 
-// Initialize and start bot
-console.log('╔════════════════════════════════════════╗');
-console.log('║   TRADING SIGNALS BOT v2.0             ║');
-console.log('╚════════════════════════════════════════╝');
-console.log(`[INFO] Symbols: ${config.symbols.join(', ')}`);
-console.log(`[INFO] Timeframe: ${config.timeframe}`);
-console.log(`[INFO] Check interval: ${config.checkIntervalMinutes} minutes`);
-console.log(`[INFO] Minimum score: ${config.minSignalScore}/100`);
-console.log(`[INFO] Risk per trade: ${config.riskPerTrade * 100}%\n`);
+// Export functions for serverless use
+module.exports = {
+  checkSignals,
+  generateSignal,
+  getOHLCV,
+  isPositionOpenSupabase,
+  saveSignalSupabase,
+  updateOpenPositionsSupabase,
+  config,
+  exchange
+};
 
-checkSignals();
-setInterval(checkSignals, config.checkIntervalMinutes * 60 * 1000);
+// Start the bot only if run directly
+if (require.main === module) {
+  // Initialize and start bot
+  console.log('╔════════════════════════════════════════╗');
+  console.log('║   TRADING SIGNALS BOT v2.0             ║');
+  console.log('╚════════════════════════════════════════╝');
+  console.log(`[INFO] Symbols: ${config.symbols.join(', ')}`);
+  console.log(`[INFO] Timeframe: ${config.timeframe}`);
+  console.log(`[INFO] Check interval: ${config.checkIntervalMinutes} minutes`);
+  console.log(`[INFO] Minimum score: ${config.minSignalScore}/100`);
+  console.log(`[INFO] Risk per trade: ${config.riskPerTrade * 100}%\n`);
+
+  checkSignals();
+  setInterval(checkSignals, config.checkIntervalMinutes * 60 * 1000);
+}

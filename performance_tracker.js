@@ -15,6 +15,15 @@ const config = {
 const exchange = new ccxt.binance({ enableRateLimit: true });
 const bot = new TelegramBot(config.telegramToken, { polling: false });
 
+// Utility: Format price with dynamic precision based on value
+function formatPrice(price) {
+    const p = parseFloat(price);
+    if (isNaN(p)) return 'N/A';
+    if (p < 1) return p.toFixed(4);
+    if (p < 10) return p.toFixed(3);
+    return p.toFixed(2);
+}
+
 // ============================================
 // LEER Y PARSEAR CSV
 // ============================================
@@ -178,7 +187,7 @@ async function checkOpenSignals() {
 
                 // Actualizar señal
                 signal.Status = newStatus;
-                signal.Exit_Price = exitPrice.toFixed(2);
+                signal.Exit_Price = formatPrice(exitPrice);
                 signal.Exit_Time = new Date().toISOString();
                 signal.PnL_Percent = pnlPercent.toFixed(2);
                 signal.PnL_USDT = pnlUSDT.toFixed(2);
@@ -199,7 +208,7 @@ async function checkOpenSignals() {
                     `━━━━━━━━━━━━━━━━━━━━\n` +
                     `📊 Estrategia: ${signal.Strategy}\n` +
                     `💰 Entry: $${signal.Entry_Price}\n` +
-                    `🎯 Exit: $${exitPrice.toFixed(2)}\n` +
+                    `🎯 Exit: $${formatPrice(exitPrice)}\n` +
                     `📈 PnL: ${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}% (${pnlUSDT >= 0 ? '+' : ''}$${pnlUSDT.toFixed(2)} USDT)\n` +
                     `⏱️ Duración: ${hours}h ${minutes}m\n` +
                     `🔥 Score: ${signal.Score}/100\n\n` +

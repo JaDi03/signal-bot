@@ -48,10 +48,33 @@ function updateMetrics() {
 }
 
 // ============================================
+// UTILIDADES DE FORMATO
+// ============================================
+function formatPrice(price) {
+    const p = parseFloat(price);
+    if (isNaN(p)) return '-';
+    if (p < 1) return `$${p.toFixed(4)}`;
+    if (p < 10) return `$${p.toFixed(3)}`;
+    return `$${p.toFixed(2)}`;
+}
+
+function formatTime(timestamp) {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000 / 60); // minutos
+    if (diff < 60) return `${diff}m`;
+    const hours = Math.floor(diff / 60);
+    const minutes = diff % 60;
+    return `${hours}h ${minutes}m`;
+}
+
+// ============================================
 // ACTUALIZAR SEÑALES ACTIVAS
 // ============================================
 function updateActiveSignals() {
     const tbody = document.getElementById('activeSignalsBody');
+    if (!tbody) return;
+
     const activeSignals = allSignals.filter(s => s.Status === 'OPEN');
 
     if (activeSignals.length === 0) {
@@ -60,30 +83,26 @@ function updateActiveSignals() {
     }
 
     tbody.innerHTML = activeSignals.map(signal => {
-        const entry = parseFloat(signal.Entry_Price);
-        const tp = parseFloat(signal.TP);
-        const sl = parseFloat(signal.SL);
-
-        // Calcular PnL flotante (placeholder - necesitaría precio actual)
-        const floatingPnL = 0; // Se actualizaría con precio en tiempo real
-
         const timestamp = new Date(signal.Timestamp);
         const now = new Date();
         const duration = Math.floor((now - timestamp) / 1000 / 60); // minutos
         const hours = Math.floor(duration / 60);
         const minutes = duration % 60;
 
+        // PnL estimate if not present
+        const pnl = parseFloat(signal.PnL_Percent || 0);
+
         return `
             <tr>
                 <td><strong>${signal.Symbol}</strong></td>
                 <td><span class="signal-${signal.Signal.toLowerCase()}">${signal.Signal}</span></td>
                 <td>${signal.Strategy}</td>
-                <td>$${entry.toFixed(2)}</td>
-                <td>$${tp.toFixed(2)}</td>
-                <td>$${sl.toFixed(2)}</td>
+                <td>${formatPrice(signal.Entry_Price)}</td>
+                <td>${formatPrice(signal.TP)}</td>
+                <td>${formatPrice(signal.SL)}</td>
                 <td><strong>${signal.Score}/100</strong></td>
-                <td class="${floatingPnL >= 0 ? 'pnl-positive' : 'pnl-negative'}">
-                    ${floatingPnL >= 0 ? '+' : ''}${floatingPnL.toFixed(2)}%
+                <td class="${pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">
+                    ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%
                 </td>
                 <td>${hours}h ${minutes}m</td>
             </tr>
@@ -148,8 +167,8 @@ function updateSignalsTable() {
                 <td><span class="signal-${signal.Signal.toLowerCase()}">${signal.Signal}</span></td>
                 <td>${signal.Strategy}</td>
                 <td>${signal.Regime}</td>
-                <td>$${entry.toFixed(2)}</td>
-                <td>${exit ? '$' + exit.toFixed(2) : '-'}</td>
+                <td>${formatPrice(entry)}</td>
+                <td>${exit ? formatPrice(exit) : '-'}</td>
                 <td class="${pnlPercent !== null ? (pnlPercent >= 0 ? 'pnl-positive' : 'pnl-negative') : ''}">
                     ${pnlPercent !== null ? (pnlPercent >= 0 ? '+' : '') + pnlPercent.toFixed(2) + '%' : '-'}
                 </td>

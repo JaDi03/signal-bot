@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const supabase = require('./supabase_client');
 
 const app = express();
 const PORT = 3000;
@@ -11,8 +12,41 @@ app.use(express.static('public'));
 // ============================================
 // FUNCIONES DE LECTURA DE CSV
 // ============================================
-function readSignals() {
+async function readSignals() {
     try {
+        // PRIORIDAD: Supabase si está configurado
+        if (process.env.SUPABASE_URL) {
+            console.log('[INFO] Reading signals from Supabase...');
+            const { data, error } = await supabase
+                .from('signals')
+                .select('*')
+                .order('timestamp', { ascending: false });
+
+            if (error) throw error;
+
+            // Mapear campos de Supabase a formato CSV para compatibilidad con el Dashboard
+            return data.map(s => ({
+                Timestamp: s.timestamp,
+                Symbol: s.symbol,
+                Signal: s.signal_type,
+                Regime: s.regime,
+                Strategy: s.strategy,
+                Entry_Price: s.entry_price,
+                SL: s.sl_price,
+                TP: s.tp_price,
+                Exit_Price: s.exit_price,
+                Exit_Time: s.exit_time,
+                PnL_Percent: s.pnl_percent,
+                PnL_USDT: s.pnl_usdt,
+                Status: s.status,
+                Score: s.score,
+                ATR: s.atr,
+                Reasons: s.reasons,
+                Timeframe: s.timeframe
+            }));
+        }
+
+        // FALLBACK: CSV Local
         if (!fs.existsSync('signals_log.csv')) {
             return [];
         }
@@ -141,10 +175,13 @@ function calculateStats(signals) {
 // API ENDPOINTS
 // ============================================
 
+// API ENDPOINTS
+// ============================================
+
 // Obtener todas las señales
-app.get('/api/signals', (req, res) => {
+app.get('/api/signals', async (req, res) => {
     try {
-        const signals = readSignals();
+        const signals = await readSignals();
         res.json({ success: true, data: signals });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -152,9 +189,9 @@ app.get('/api/signals', (req, res) => {
 });
 
 // Obtener solo señales abiertas
-app.get('/api/signals/active', (req, res) => {
+app.get('/api/signals/active', async (req, res) => {
     try {
-        const signals = readSignals();
+        const signals = await readSignals();
         const activeSignals = signals.filter(s => s.Status === 'OPEN');
         res.json({ success: true, data: activeSignals });
     } catch (err) {
@@ -163,9 +200,9 @@ app.get('/api/signals/active', (req, res) => {
 });
 
 // Obtener estadísticas
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', async (req, res) => {
     try {
-        const signals = readSignals();
+        const signals = await readSignals();
         const stats = calculateStats(signals);
         res.json({ success: true, data: stats });
     } catch (err) {
@@ -174,9 +211,9 @@ app.get('/api/stats', (req, res) => {
 });
 
 // Obtener desempeño por símbolo
-app.get('/api/performance/:symbol', (req, res) => {
+app.get('/api/performance/:symbol', async (req, res) => {
     try {
-        const signals = readSignals();
+        const signals = await readSignals();
         const symbolSignals = signals.filter(s => s.Symbol === req.params.symbol);
         const stats = calculateStats(symbolSignals);
         res.json({ success: true, data: stats });
