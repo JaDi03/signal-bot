@@ -116,6 +116,7 @@ function isPositionOpenLocal(symbol) {
  */
 
 async function isPositionOpenSupabase(symbol) {
+  if (!supabase) return false;
   try {
     const { data, error } = await supabase
       .from('signals')
@@ -132,6 +133,7 @@ async function isPositionOpenSupabase(symbol) {
 }
 
 async function saveSignalSupabase(signal, symbol) {
+  if (!supabase) return false;
   try {
     const { error } = await supabase
       .from('signals')
@@ -160,6 +162,7 @@ async function saveSignalSupabase(signal, symbol) {
 }
 
 async function updateOpenPositionsSupabase() {
+  if (!supabase) return;
   try {
     console.log('[DEBUG] Checking open positions in Supabase...');
     const { data: openSignals, error } = await supabase
@@ -948,7 +951,7 @@ async function checkSignals() {
             }
 
             // NEW: Save to Supabase
-            if (process.env.SUPABASE_URL) {
+            if (supabase) {
               await saveSignalSupabase(signal, symbol);
             }
 

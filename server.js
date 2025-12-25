@@ -14,8 +14,8 @@ app.use(express.static('public'));
 // ============================================
 async function readSignals() {
     try {
-        // PRIORIDAD: Supabase si está configurado
-        if (process.env.SUPABASE_URL) {
+        // PRIORIDAD: Supabase si está configurado y el cliente se inició correctamente
+        if (supabase) {
             console.log('[INFO] Reading signals from Supabase...');
             const { data, error } = await supabase
                 .from('signals')
