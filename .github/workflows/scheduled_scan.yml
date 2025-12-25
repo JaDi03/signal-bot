@@ -1,0 +1,18 @@
+name: Bot Scheduled Scan
+
+on:
+  schedule:
+    # Se ejecuta cada hora (00:00, 01:00, etc.)
+    - cron: '0 * * * *'
+  workflow_dispatch: # Permite ejecución manual desde GitHub
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Bot Scan Endpoint
+        run: |
+          # Reemplaza la URL con tu URL real de Vercel después del despliegue
+          # El secreto CRON_SECRET debe configurarse en los Settings de GitHub del repositorio
+          curl -X GET "https://signal-bot-nine.vercel.app/api/scan" \
+          -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

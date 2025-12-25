@@ -20,12 +20,6 @@
             "dest": "server.js"
         }
     ],
-    "crons": [
-        {
-            "path": "/api/scan",
-            "schedule": "0 * * * *"
-        }
-    ],
     "env": {
         "NODE_ENV": "production"
     }
