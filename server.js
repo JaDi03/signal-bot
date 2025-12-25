@@ -228,12 +228,16 @@ app.get('/', (req, res) => {
 });
 
 // ============================================
-// INICIAR SERVIDOR
+// INICIAR SERVIDOR / EXPORTAR PARA VERCEL
 // ============================================
-app.listen(PORT, () => {
-    console.log('╔════════════════════════════════════════╗');
-    console.log('║   DASHBOARD SERVER v1.0                ║');
-    console.log('╚════════════════════════════════════════╝');
-    console.log(`[INFO] Server running at http://localhost:${PORT}`);
-    console.log(`[INFO] Open your browser and navigate to the URL above\n`);
-});
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log('╔════════════════════════════════════════╗');
+        console.log('║   DASHBOARD SERVER v1.0                ║');
+        console.log('╚════════════════════════════════════════╝');
+        console.log(`[INFO] Server running at http://localhost:${PORT}`);
+        console.log(`[INFO] Open your browser and navigate to the URL above\n`);
+    });
+}
+
+module.exports = app;
