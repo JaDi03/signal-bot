@@ -1,5 +1,9 @@
 const { createClient } = require('@supabase/supabase-js');
-require('dotenv').config();
+try {
+    require('dotenv').config();
+} catch (err) {
+    // Ignorar si no está instalado (entorno Vercel)
+}
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
