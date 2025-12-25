@@ -9,7 +9,6 @@ const OrderBlockDetector = require('./orderblock_detector');
 const GapAnalyzer = require('./gap_analyzer');
 const NewsAnalyzer = require('./news_analyzer');
 const supabase = require('./supabase_client');
-const supabase = require('./supabase_client');
 
 // Configuration
 const config = {
@@ -44,10 +43,16 @@ const bot = new TelegramBot(config.telegramToken, { polling: false });
 const newsAnalyzer = new NewsAnalyzer();
 const lastSignals = {};
 
-// Initialize CSV with headers
-if (!fs.existsSync(config.logFile)) {
-  const header = 'Timestamp,Symbol,Signal,Regime,Strategy,Entry_Price,SL,TP,Position_Size_USDT,Status,Exit_Price,Exit_Time,PnL_Percent,PnL_USDT,Score,ATR,Reasons,Timeframe\n';
-  fs.writeFileSync(config.logFile, header);
+// Initialize CSV with headers (Only if NOT in Vercel to avoid Read-only filesystem error)
+if (!process.env.VERCEL) {
+  if (!fs.existsSync(config.logFile)) {
+    try {
+      const header = 'Timestamp,Symbol,Signal,Regime,Strategy,Entry_Price,SL,TP,Position_Size_USDT,Status,Exit_Price,Exit_Time,PnL_Percent,PnL_USDT,Score,ATR,Reasons,Timeframe\n';
+      fs.writeFileSync(config.logFile, header);
+    } catch (err) {
+      console.warn('[WARN] File system is read-only or inaccessible:', err.message);
+    }
+  }
 }
 
 // Utility: Sleep function for delays
@@ -84,7 +89,7 @@ function isPositionOpen(symbol) {
 // Utility: Check if there's already an open position for a symbol (Local CSV)
 function isPositionOpenLocal(symbol) {
   try {
-    if (!fs.existsSync(config.logFile)) return false;
+    if (process.env.VERCEL || !fs.existsSync(config.logFile)) return false;
     const content = fs.readFileSync(config.logFile, 'utf-8');
     const lines = content.trim().split('\n');
     if (lines.length <= 1) return false;
@@ -931,11 +936,17 @@ async function checkSignals() {
               console.error('[ERROR] Telegram:', telegramErr.message);
             }
 
-            // Save to CSV
-            const timestamp = new Date().toISOString();
-            const entry = `${timestamp},${symbol},${signal.type},${signal.regime},${signal.strategy},${formatPrice(signal.price)},${formatPrice(signal.sl)},${formatPrice(signal.tp)},${signal.positionSize.toFixed(2)},OPEN,,,,,${signal.score.toFixed(0)},${signal.atr.toFixed(2)},"${signal.reasons}",${config.timeframe}\n`;
-            fs.appendFileSync(config.logFile, entry);
-            console.log(`[SUCCESS] Saved to ${config.logFile}`);
+            // Save to CSV (Only if NOT in Vercel)
+            if (!process.env.VERCEL) {
+              try {
+                const timestamp = new Date().toISOString();
+                const entry = `${timestamp},${symbol},${signal.type},${signal.regime},${signal.strategy},${formatPrice(signal.price)},${formatPrice(signal.sl)},${formatPrice(signal.tp)},${signal.positionSize.toFixed(2)},OPEN,,,,,${signal.score.toFixed(0)},${signal.atr.toFixed(2)},"${signal.reasons}",${config.timeframe}\n`;
+                fs.appendFileSync(config.logFile, entry);
+                console.log(`[SUCCESS] Saved to ${config.logFile}`);
+              } catch (csvErr) {
+                console.warn('[WARN] Could not save to local CSV (likely read-only FS):', csvErr.message);
+              }
+            }
 
             // NEW: Save to Supabase
             if (process.env.SUPABASE_URL) {
