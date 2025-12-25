@@ -1,8 +1,9 @@
 const { checkSignals } = require('../bot');
 
-export default async function handler(req, res) {
-    // Verificar secreto de Cron (Opcional pero recomendado)
-    const authHeader = req.headers.get('authorization');
+module.exports = async (req, res) => {
+    // En Vercel Serverless (CommonJS), req.headers es un objeto plano
+    const authHeader = req.headers['authorization'];
+
     if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
         return res.status(401).json({ success: false, message: 'No autorizado' });
     }
@@ -21,4 +22,4 @@ export default async function handler(req, res) {
         console.error('[CRON ERROR]', err.message);
         res.status(500).json({ success: false, error: err.message });
     }
-}
+};
