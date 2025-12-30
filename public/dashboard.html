@@ -9,13 +9,11 @@
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
         <header class="header">
             <h1>📊 Trading Bot Dashboard</h1>
             <div class="last-update">Última actualización: <span id="lastUpdate">--</span></div>
         </header>
 
-        <!-- Métricas Principales -->
         <div class="metrics-grid">
             <div class="metric-card">
                 <div class="metric-icon">📈</div>
@@ -50,7 +48,6 @@
             </div>
         </div>
 
-        <!-- Señales Activas -->
         <section class="section">
             <h2>🟡 Señales Activas</h2>
             <div class="table-container">
@@ -63,21 +60,20 @@
                             <th>Entry</th>
                             <th>TP</th>
                             <th>SL</th>
-                            <th>Score</th>
+                            <th>ATR</th> <th>Score</th>
                             <th>PnL Flotante</th>
                             <th>Tiempo</th>
                         </tr>
                     </thead>
                     <tbody id="activeSignalsBody">
                         <tr>
-                            <td colspan="9" class="no-data">No hay señales activas</td>
+                            <td colspan="10" class="no-data">No hay señales activas</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
         </section>
 
-        <!-- Gráficos -->
         <div class="charts-grid">
             <div class="chart-card">
                 <h3>Curva de Equity</h3>
@@ -100,7 +96,6 @@
             </div>
         </div>
 
-        <!-- Filtros -->
         <section class="section">
             <div class="filters">
                 <h2>🔍 Historial de Señales</h2>
@@ -108,10 +103,11 @@
                     <input type="text" id="searchInput" placeholder="Buscar por símbolo...">
                     <select id="statusFilter">
                         <option value="">Todos los estados</option>
-                        <option value="OPEN">Abiertas</option>
-                        <option value="TP_HIT">TP Alcanzado</option>
-                        <option value="SL_HIT">SL Alcanzado</option>
-                    </select>
+                        <option value="OPEN">🟡 Abiertas</option>
+                        <option value="CLOSED">⚪ Cerradas Manual</option>
+                        <option value="TP_HIT">🟢 TP Alcanzado</option>
+                         <option value="SL_HIT">🔴 SL Alcanzado</option>
+                     </select>
                     <select id="signalTypeFilter">
                         <option value="">Todos los tipos</option>
                         <option value="LONG">LONG</option>
@@ -128,14 +124,12 @@
                             <th>Símbolo</th>
                             <th>Tipo</th>
                             <th>Estrategia</th>
-                            <th>Régimen</th>
                             <th>Entry</th>
                             <th>Exit</th>
                             <th>PnL %</th>
-                            <th>PnL USDT</th>
-                            <th>Score</th>
+                            <th>ATR</th> <th>Score</th>
                             <th>Estado</th>
-                        </tr>
+                            <th>Info</th> </tr>
                     </thead>
                     <tbody id="signalsBody">
                         <tr>

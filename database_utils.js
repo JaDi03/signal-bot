@@ -76,3 +76,45 @@ function calculateStats(signals) {
 }
 
 module.exports = { readSignals, calculateStats };
+
+
+// Añade esta función a tu módulo de base de datos
+async function saveSignal(signalData) {
+    try {
+        const payload = {
+            timestamp: new Date().toISOString(),
+            symbol: signalData.symbol,
+            signal_type: signalData.type,
+            regime: signalData.regime,
+            strategy: signalData.strategy,
+            entry_price: signalData.price,
+            sl_price: signalData.sl,
+            tp_price: signalData.tp,
+            status: 'OPEN', // Inicia abierta hasta que el monitor de precios la cierre
+            score: signalData.score,
+            atr: signalData.atr,
+            reasons: signalData.reasons,
+            timeframe: config.timeframe || '15m'
+        };
+
+        // 1. Guardar en Supabase (Si está configurado)
+        if (supabase) {
+            const { error } = await supabase.from('signals').insert([payload]);
+            if (error) console.error('[SUPABASE ERROR]', error.message);
+        }
+
+        // 2. Guardar en CSV (Respaldo local siempre)
+        const csvLine = `\n${payload.timestamp},${payload.symbol},${payload.signal_type},${payload.regime},${payload.strategy},${payload.entry_price},${payload.sl_price},${payload.tp_price},OPEN,${payload.score},${payload.atr},"${payload.reasons}",${payload.timeframe}`;
+        
+        if (!fs.existsSync('signals_log.csv')) {
+            const headers = 'Timestamp,Symbol,Signal,Regime,Strategy,Entry_Price,SL,TP,Status,Score,ATR,Reasons,Timeframe';
+            fs.writeFileSync('signals_log.csv', headers + csvLine);
+        } else {
+            fs.appendFileSync('signals_log.csv', csvLine);
+        }
+
+        console.log(`[DATABASE] Signal saved successfully for ${signalData.symbol}`);
+    } catch (err) {
+        console.error('[SAVE SIGNAL ERROR]', err.message);
+    }
+}

@@ -36,7 +36,7 @@ async function fetchData() {
 // ACTUALIZAR MÉTRICAS
 // ============================================
 function updateMetrics() {
-    document.getElementById('winRate').textContent = `${stats.winRate || 0}%`;
+    document.getElementById('winRate').textContent = `${(stats.winRate || 0).toFixed(1)}%`;
 
     const pnl = parseFloat(stats.totalPnL || 0);
     const pnlElement = document.getElementById('totalPnL');
@@ -91,16 +91,20 @@ function updateActiveSignals() {
 
         // PnL estimate if not present
         const pnl = parseFloat(signal.PnL_Percent || 0);
+        
+        // ✅ FIX: Validar que Signal existe antes de hacer toLowerCase
+        const signalType = signal.Signal || 'UNKNOWN';
+        const signalClass = signalType.toLowerCase();
 
         return `
             <tr>
-                <td><strong>${signal.Symbol}</strong></td>
-                <td><span class="signal-${signal.Signal.toLowerCase()}">${signal.Signal}</span></td>
-                <td>${signal.Strategy}</td>
+                <td><strong>${signal.Symbol || '-'}</strong></td>
+                <td><span class="signal-${signalClass}">${signalType}</span></td>
+                <td>${signal.Strategy || '-'}</td>
                 <td>${formatPrice(signal.Entry_Price)}</td>
                 <td>${formatPrice(signal.TP)}</td>
                 <td>${formatPrice(signal.SL)}</td>
-                <td><strong>${signal.Score}/100</strong></td>
+                <td><strong>${signal.Score || '-'}/100</strong></td>
                 <td class="${pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">
                     ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%
                 </td>
@@ -124,19 +128,19 @@ function updateSignalsTable() {
     // Aplicar filtros
     let filteredSignals = [...allSignals];
 
-    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+    const searchTerm = document.getElementById('searchInput')?.value.toLowerCase() || '';
     if (searchTerm) {
         filteredSignals = filteredSignals.filter(s =>
-            s.Symbol.toLowerCase().includes(searchTerm)
+            (s.Symbol || '').toLowerCase().includes(searchTerm)
         );
     }
 
-    const statusFilter = document.getElementById('statusFilter').value;
+    const statusFilter = document.getElementById('statusFilter')?.value || '';
     if (statusFilter) {
         filteredSignals = filteredSignals.filter(s => s.Status === statusFilter);
     }
 
-    const signalTypeFilter = document.getElementById('signalTypeFilter').value;
+    const signalTypeFilter = document.getElementById('signalTypeFilter')?.value || '';
     if (signalTypeFilter) {
         filteredSignals = filteredSignals.filter(s => s.Signal === signalTypeFilter);
     }
@@ -160,13 +164,17 @@ function updateSignalsTable() {
             statusBadge = '<span class="status-badge status-sl">SL ✗</span>';
         }
 
+        // ✅ FIX: Validar que Signal existe antes de hacer toLowerCase
+        const signalType = signal.Signal || 'UNKNOWN';
+        const signalClass = signalType.toLowerCase();
+
         return `
             <tr>
                 <td>${timestamp}</td>
-                <td><strong>${signal.Symbol}</strong></td>
-                <td><span class="signal-${signal.Signal.toLowerCase()}">${signal.Signal}</span></td>
-                <td>${signal.Strategy}</td>
-                <td>${signal.Regime}</td>
+                <td><strong>${signal.Symbol || '-'}</strong></td>
+                <td><span class="signal-${signalClass}">${signalType}</span></td>
+                <td>${signal.Strategy || '-'}</td>
+                <td>${signal.Regime || '-'}</td>
                 <td>${formatPrice(entry)}</td>
                 <td>${exit ? formatPrice(exit) : '-'}</td>
                 <td class="${pnlPercent !== null ? (pnlPercent >= 0 ? 'pnl-positive' : 'pnl-negative') : ''}">
@@ -175,7 +183,7 @@ function updateSignalsTable() {
                 <td class="${pnlUSDT !== null ? (pnlUSDT >= 0 ? 'pnl-positive' : 'pnl-negative') : ''}">
                     ${pnlUSDT !== null ? (pnlUSDT >= 0 ? '+' : '') + '$' + pnlUSDT.toFixed(2) : '-'}
                 </td>
-                <td><strong>${signal.Score}/100</strong></td>
+                <td><strong>${signal.Score || '-'}/100</strong></td>
                 <td>${statusBadge}</td>
             </tr>
         `;
@@ -193,7 +201,8 @@ function updateCharts() {
 }
 
 function updateEquityChart() {
-    const ctx = document.getElementById('equityChart').getContext('2d');
+    const ctx = document.getElementById('equityChart')?.getContext('2d');
+    if (!ctx) return;
 
     // Calcular equity acumulado
     const closedSignals = allSignals.filter(s => s.Status === 'TP_HIT' || s.Status === 'SL_HIT');
@@ -244,7 +253,8 @@ function updateEquityChart() {
 }
 
 function updateSymbolChart() {
-    const ctx = document.getElementById('symbolChart').getContext('2d');
+    const ctx = document.getElementById('symbolChart')?.getContext('2d');
+    if (!ctx) return;
 
     const symbols = Object.keys(stats.bySymbol || {});
     const winRates = symbols.map(symbol => {
@@ -293,7 +303,8 @@ function updateSymbolChart() {
 }
 
 function updateStrategyChart() {
-    const ctx = document.getElementById('strategyChart').getContext('2d');
+    const ctx = document.getElementById('strategyChart')?.getContext('2d');
+    if (!ctx) return;
 
     const strategies = Object.keys(stats.byStrategy || {});
     const winRates = strategies.map(strategy => {
@@ -336,7 +347,8 @@ function updateStrategyChart() {
 }
 
 function updatePnLDistChart() {
-    const ctx = document.getElementById('pnlDistChart').getContext('2d');
+    const ctx = document.getElementById('pnlDistChart')?.getContext('2d');
+    if (!ctx) return;
 
     const closedSignals = allSignals.filter(s => s.Status === 'TP_HIT' || s.Status === 'SL_HIT');
     const pnls = closedSignals.map(s => parseFloat(s.PnL_Percent || 0));
@@ -399,20 +411,21 @@ function updatePnLDistChart() {
 // ACTUALIZAR ÚLTIMA ACTUALIZACIÓN
 // ============================================
 function updateLastUpdate() {
-    document.getElementById('lastUpdate').textContent = new Date().toLocaleString();
+    const elem = document.getElementById('lastUpdate');
+    if (elem) elem.textContent = new Date().toLocaleString();
 }
 
 // ============================================
 // EVENT LISTENERS
 // ============================================
-document.getElementById('searchInput').addEventListener('input', updateSignalsTable);
-document.getElementById('statusFilter').addEventListener('change', updateSignalsTable);
-document.getElementById('signalTypeFilter').addEventListener('change', updateSignalsTable);
-
-// ============================================
-// INICIALIZACIÓN
-// ============================================
-fetchData();
-
-// Auto-refresh cada 30 segundos
-setInterval(fetchData, 30000);
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('searchInput')?.addEventListener('input', updateSignalsTable);
+    document.getElementById('statusFilter')?.addEventListener('change', updateSignalsTable);
+    document.getElementById('signalTypeFilter')?.addEventListener('change', updateSignalsTable);
+    
+    // Inicialización
+    fetchData();
+    
+    // Auto-refresh cada 30 segundos
+    setInterval(fetchData, 30000);
+});

@@ -14,40 +14,10 @@ app.use(express.static('public'));
 // ============================================
 async function readSignals() {
     try {
-        // PRIORIDAD: Supabase si está configurado y el cliente se inició correctamente
-        if (supabase) {
-            console.log('[INFO] Reading signals from Supabase...');
-            const { data, error } = await supabase
-                .from('signals')
-                .select('*')
-                .order('timestamp', { ascending: false });
-
-            if (error) throw error;
-
-            // Mapear campos de Supabase a formato CSV para compatibilidad con el Dashboard
-            return data.map(s => ({
-                Timestamp: s.timestamp,
-                Symbol: s.symbol,
-                Signal: s.signal_type,
-                Regime: s.regime,
-                Strategy: s.strategy,
-                Entry_Price: s.entry_price,
-                SL: s.sl_price,
-                TP: s.tp_price,
-                Exit_Price: s.exit_price,
-                Exit_Time: s.exit_time,
-                PnL_Percent: s.pnl_percent,
-                PnL_USDT: s.pnl_usdt,
-                Status: s.status,
-                Score: s.score,
-                ATR: s.atr,
-                Reasons: s.reasons,
-                Timeframe: s.timeframe
-            }));
-        }
-
-        // FALLBACK: CSV Local
+        // Fallback: CSV Local (Priorizamos local ya que Supabase te está dando fetch failed)
+        console.log('[INFO] Reading signals from CSV...');
         if (!fs.existsSync('signals_log.csv')) {
+            console.log('[WARN] CSV file not found');
             return [];
         }
 
@@ -55,24 +25,30 @@ async function readSignals() {
         const lines = content.trim().split('\n');
 
         if (lines.length <= 1) {
+            console.log('[WARN] CSV is empty');
             return [];
         }
 
-        const headers = lines[0].split(',');
+        const headers = lines[0].split(',').map(h => h.trim());
         const signals = [];
 
         for (let i = 1; i < lines.length; i++) {
-            const values = lines[i].split(',');
-            if (values.length < headers.length) continue;
+            // ✅ NUEVO: Este Regex separa por comas pero IGNORA las comas dentro de comillas
+            const values = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
+            
+            if (!values || values.length < headers.length) continue;
 
             const signal = {};
             headers.forEach((header, index) => {
-                signal[header.trim()] = values[index]?.trim().replace(/"/g, '') || '';
+                // Limpiamos comillas y espacios
+                let val = values[index] ? values[index].trim().replace(/^"|"$/g, '') : '';
+                signal[header] = val;
             });
 
             signals.push(signal);
         }
 
+        console.log(`[SUCCESS] Read ${signals.length} signals from CSV`);
         return signals;
     } catch (err) {
         console.error('[ERROR] readSignals:', err.message);
@@ -172,9 +148,6 @@ function calculateStats(signals) {
 }
 
 // ============================================
-// API ENDPOINTS
-// ============================================
-
 // API ENDPOINTS
 // ============================================
 

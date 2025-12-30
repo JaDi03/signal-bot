@@ -8,8 +8,9 @@ const TelegramBot = require('node-telegram-bot-api');
 const config = {
     logFile: 'signals_log.csv',
     checkIntervalMinutes: 5,  // Verificar cada 5 minutos
-    telegramToken: 'TU_BOT_TOKEN_AQUÍ',
-    chatId: 'TU_CHAT_ID_AQUÍ',
+    telegramToken: process.env.TELEGRAM_TOKEN,
+    chatId: process.env.TELEGRAM_CHAT_ID,
+  
 };
 
 const exchange = new ccxt.binance({ enableRateLimit: true });
