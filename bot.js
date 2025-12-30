@@ -22,6 +22,8 @@ const LiquidityAnalyzer = require('./liquidity_analyzer');
 const OrderBlockDetector = require('./orderblock_detector');
 const GapAnalyzer = require('./gap_analyzer');
 const NewsAnalyzer = require('./news_analyzer');
+const DivergenceAnalyzer = require('./divergence_analyzer');
+const FibonacciAnalyzer = require('./fibonacci_analyzer'); // NEW
 
 // Configuration
 const config = {
@@ -194,7 +196,176 @@ async function closePosition(position, exitPrice, reason = 'TP/SL') {
   }
 }
 
+// ============ HERRAMIENTAS TÉCNICAS (RESTORED) ============
 
+async function getOHLCV(symbol, limit = 100, timeframe = config.timeframe) {
+  try {
+    const candles = await exchange.fetchOHLCV(symbol, timeframe, undefined, limit);
+    return candles.map(c => ({
+      timestamp: c[0],
+      open: c[1],
+      high: c[2],
+      low: c[3],
+      close: c[4],
+      volume: c[5]
+    }));
+  } catch (err) {
+    console.error(`[API ERROR] getOHLCV ${symbol}:`, err.message);
+    return [];
+  }
+}
+
+function calculateAllIndicators(candles) {
+  if (candles.length < 52) return null;
+  const closes = candles.map(c => c.close);
+  const highs = candles.map(c => c.high);
+  const lows = candles.map(c => c.low);
+  const volumes = candles.map(c => c.volume);
+
+  const ema50 = TechnicalIndicators.EMA.calculate({ period: 50, values: closes });
+  const ema200 = TechnicalIndicators.EMA.calculate({ period: 200, values: closes });
+  const rsi = TechnicalIndicators.RSI.calculate({ period: 14, values: closes });
+  const macd = TechnicalIndicators.MACD.calculate({ values: closes, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9, SimpleMAOscillator: false, SimpleMASignal: false });
+  const adx = TechnicalIndicators.ADX.calculate({ high: highs, low: lows, close: closes, period: 14 });
+  const bollinger = TechnicalIndicators.BollingerBands.calculate({ period: 20, values: closes, stdDev: 2 });
+  const atr = TechnicalIndicators.ATR.calculate({ high: highs, low: lows, close: closes, period: 14 });
+
+  // Get last values
+  const lastIdx = closes.length - 1;
+  const rsiIdx = rsi.length - 1;
+  const macdIdx = macd.length - 1;
+  const adxIdx = adx.length - 1;
+  const bbIdx = bollinger.length - 1;
+  const atrIdx = atr.length - 1;
+  const ema50Idx = ema50.length - 1;
+  const ema200Idx = ema200.length - 1;
+
+  if (rsiIdx < 0 || macdIdx < 0) return null;
+
+  return {
+    close: closes[lastIdx],
+    ema50: ema50[ema50Idx],
+    ema200: ema200[ema200Idx],
+    rsi: rsi[rsiIdx],
+    rsiPrev: rsi[rsiIdx - 1],
+    macd: macd[macdIdx],
+    macdHistogram: macd[macdIdx].histogram,
+    macdHistogramPrev: macd[macdIdx - 1].histogram,
+    adx: adx[adxIdx].adx,
+    pdi: adx[adxIdx].pdi,
+    mdi: adx[adxIdx].mdi,
+    bbUpper: bollinger[bbIdx].upper,
+    bbLower: bollinger[bbIdx].lower,
+    bbMiddle: bollinger[bbIdx].middle,
+    bbWidth: (bollinger[bbIdx].upper - bollinger[bbIdx].lower) / bollinger[bbIdx].middle,
+    atr: atr[atrIdx],
+    volumeRatio: volumes[lastIdx] / (volumes.slice(lastIdx - 10, lastIdx).reduce((a, b) => a + b, 0) / 10),
+  };
+}
+
+function detectMarketRegime(ind) {
+  if (ind.adx > 25) return { regime: 'TRENDING' };
+  if (ind.bbWidth < 0.05) return { regime: 'BREAKOUT', ready: true }; // Low volatility squeeze
+  return { regime: 'RANGING' };
+}
+
+// ============ ESTRATEGIAS (RESTORED & ENHANCED) ============
+
+function generateMomentumSignal(ind) {
+  let scoreLong = 0, scoreShort = 0, reasons = [];
+
+  if (ind.close > ind.ema50) scoreLong += 20;
+  if (ind.ema50 > ind.ema200) scoreLong += 20;
+  if (ind.rsi > 50 && ind.rsi < 70) scoreLong += 15;
+  if (ind.macdHistogram > 0 && ind.macdHistogram > ind.macdHistogramPrev) scoreLong += 20;
+  if (ind.pdi > ind.mdi) scoreLong += 25;
+
+  if (ind.close < ind.ema50) scoreShort += 20;
+  if (ind.ema50 < ind.ema200) scoreShort += 20;
+  if (ind.rsi < 50 && ind.rsi > 30) scoreShort += 15;
+  if (ind.macdHistogram < 0 && ind.macdHistogram < ind.macdHistogramPrev) scoreShort += 20;
+  if (ind.mdi > ind.pdi) scoreShort += 25;
+
+  if (scoreLong > 60) reasons.push('Strong Trend Momentum (Long)');
+  if (scoreShort > 60) reasons.push('Strong Trend Momentum (Short)');
+
+  return { long: scoreLong, short: scoreShort, reasons };
+}
+
+function generateMeanReversionSignal(ind) {
+  let scoreLong = 0, scoreShort = 0, reasons = [];
+
+  if (ind.close < ind.bbLower) {
+    scoreLong += 45; // Boosted to trigger on touch (acc > 40)
+    reasons.push('Price < BB Lower (Range Bot)');
+  }
+  if (ind.close > ind.bbUpper) {
+    scoreShort += 45; // Boosted to trigger on touch (acc > 40)
+    reasons.push('Price > BB Upper (Range Top)');
+  }
+
+  if (ind.rsi < 35) {
+    scoreLong += 30;
+    reasons.push(`RSI Oversold (${ind.rsi.toFixed(1)})`);
+  }
+  if (ind.rsi > 65) {
+    scoreShort += 30;
+    reasons.push(`RSI Overbought (${ind.rsi.toFixed(1)})`);
+  }
+
+  if (ind.macdHistogram < 0 && ind.macdHistogram > ind.macdHistogramPrev) {
+    scoreLong += 20;
+  }
+  if (ind.macdHistogram > 0 && ind.macdHistogram < ind.macdHistogramPrev) {
+    scoreShort += 20;
+  }
+
+  return { long: scoreLong, short: scoreShort, reasons };
+}
+
+function generateBreakoutSignal(ind) {
+  let scoreLong = 0, scoreShort = 0, reasons = [];
+
+  if (ind.close > ind.bbUpper) scoreLong += 50;
+  if (ind.close < ind.bbLower) scoreShort += 50;
+
+  if (ind.adx > 20 && ind.adx > ind.adxPrev) {
+    scoreLong += 20;
+    scoreShort += 20;
+  }
+  reasons.push('Volatility Breakout');
+  return { long: scoreLong, short: scoreShort, reasons };
+}
+
+function calculateDynamicTP(type, price, atr, liquidity, ob, gap) {
+  let target = type === 'LONG' ? price + (atr * 3) : price - (atr * 3);
+
+  if (type === 'LONG') {
+    const liquidityTarget = liquidity.above.find(l => l > price);
+    if (liquidityTarget) return Math.min(target, liquidityTarget);
+  } else {
+    const liquidityTarget = liquidity.below.find(l => l < price);
+    if (liquidityTarget) return Math.max(target, liquidityTarget);
+  }
+  return target;
+}
+
+function calculateDynamicSL(type, price, atr, liquidity, ob, gap) {
+  let stop = type === 'LONG' ? price - (atr * 1.5) : price + (atr * 1.5);
+
+  if (type === 'LONG') {
+    if (ob.bullish.length > 0) {
+      const nearestOB = ob.bullish[0];
+      if (nearestOB.bottom < price) return Math.max(stop, nearestOB.bottom - (atr * 0.2));
+    }
+  } else {
+    if (ob.bearish.length > 0) {
+      const nearestOB = ob.bearish[0];
+      if (nearestOB.top > price) return Math.min(stop, nearestOB.top + (atr * 0.2));
+    }
+  }
+  return stop;
+}
 async function getHigherTimeframeBias(symbol, timeframe = '1h') {
   try {
     const htfCandles = await getOHLCV(symbol, 200, timeframe); // 200 velas en 1h o 4h
@@ -252,15 +423,17 @@ async function generateSignal(candles, symbol, sentimentData) {
   const price = ind.close;
   const regime = detectMarketRegime(ind);
 
-  // Analizadores SMC
+  // Analizadores SMC & Fib
   let liquidityMap = { above: [], below: [] };
   let obDetector = { bullish: [], bearish: [] };
   let gapDetector = { bullish: [], bearish: [] };
+  let fibResults = null;
 
   try {
     liquidityMap = new LiquidityAnalyzer(candles, price).analyze();
     obDetector = new OrderBlockDetector(candles, price).detect();
     gapDetector = new GapAnalyzer(candles, price).detect();
+    fibResults = new FibonacciAnalyzer(candles, price).getOptimalEntry(); // NEW: Fib Analysis
   } catch (err) {
     console.warn(`[WARN] Analizadores SMC no disponibles para ${symbol}:`, err.message);
   }
@@ -286,27 +459,75 @@ async function generateSignal(candles, symbol, sentimentData) {
     signalType = 'SHORT';
   }
 
-  if (!signalType) return null;
+  // ========== FILTRO DE VOLUMEN (ADAPTATIVO / RVOL) ==========
+  // "Professional Context-Aware Filter"
+  // Use 50 candles for a robust average volume baseline
+  const avgVol50 = candles.slice(-50).reduce((a, b) => a + b.volume, 0) / 50;
+  const lastVol = candles[candles.length - 1].volume;
+  const rvol = lastVol / (avgVol50 || 1); // Relative Volume
 
-  // ========== FILTRO DE SESIÓN (ALTA LIQUIDEZ - LONDON/NY) ==========
-  if (MODE !== 'TRAIN') {
-    const hourUTC = new Date().getUTCHours();
-    const isHighLiquidity = hourUTC >= 8 && hourUTC <= 17;
+  let volThreshold = 0.8; // Default
 
-    if (!isHighLiquidity) {
-      console.log('[SESSION ⏰] Fuera de horario alta liquidez');
-      return null;
+  // Context: Breakouts need volume. Ranges do not.
+  if (strategyName === 'MOMENTUM' || strategyName === 'BREAKOUT') {
+    volThreshold = 1.0; // Must be above average
+  } else if (strategyName === 'MEAN_REVERSION') {
+    volThreshold = 0.4; // Can be quiet (40% of average is fine for range)
+  }
+
+  if (rvol < volThreshold) {
+    // Log only sometimes to avoid spam, or log verbose if needed
+    if (Math.random() < 0.2) {
+      console.log(`[VOL 🔇] ${symbol} Ignorado. RVOL: ${rvol.toFixed(2)} < Requerido: ${volThreshold} (${strategyName})`);
+    }
+    return null;
+  }
+
+  // ...
+
+
+
+  if (!signalType) {
+    console.log(`[WEAK 📉] ${symbol} Sin señal fuerte (L:${strategySignals.long.toFixed(0)} S:${strategySignals.short.toFixed(0)})`);
+    return null;
+  }
+  // El usuario solicitó actividad continua (24/7)
+  // if (MODE !== 'TRAIN') { ... } 
+
+  // ========== ANALISIS FIBONACCI (NEW) ==========
+  if (fibResults && fibResults.nearestLevel) {
+    if (fibResults.distanceKeywords === 'SPOT_ON' || fibResults.distanceKeywords === 'NEAR') {
+      const fibTrend = fibResults.trend; // 'UP' means price went up, now coming down
+
+      if (signalType === 'LONG' && fibTrend === 'UP') {
+        console.log(`[FIB 🐚] Precio en zona óptima de rebote alcista (${fibResults.nearestLevel.toFixed(2)})`);
+        strategySignals.long += 15;
+        strategySignals.reasons.push(`Fib Bounce Support`);
+      }
+      if (signalType === 'SHORT' && fibTrend === 'DOWN') {
+        console.log(`[FIB 🐚] Precio en zona óptima de rechazo bajista (${fibResults.nearestLevel.toFixed(2)})`);
+        strategySignals.short += 15;
+        strategySignals.reasons.push(`Fib Bounce Resistance`);
+      }
     }
   }
 
+  // ========== ANÁLISIS DE DIVERGENCIAS (PROFESIONAL) ==========
+  const divAnalyzer = new DivergenceAnalyzer(candles, price);
+  const div = divAnalyzer.detect();
 
-  // ========== FILTRO DE VOLUMEN ==========
-  const lastVol = candles[candles.length - 1].volume;
-  const avgVol = candles.slice(-10).reduce((a, b) => a + b.volume, 0) / 10;
-  if (lastVol < avgVol * 0.8) {
-    console.log('[VOL ⚠️] Volumen débil — señal ignorada');
-    return null;
+  if (div.bullish.length > 0) {
+    console.log(`[DIVERGENCE 💎] Bullish Divergence detected on ${symbol}`);
+    strategySignals.long += 15;
+    strategySignals.reasons.push('Bullish Divergence');
   }
+  if (div.bearish.length > 0) {
+    console.log(`[DIVERGENCE 💎] Bearish Divergence detected on ${symbol}`);
+    strategySignals.short += 15;
+    strategySignals.reasons.push('Bearish Divergence');
+  }
+
+
 
   // ========== CÁLCULO TP/SL Y RR ==========
   const atr = ind.atr || (price * 0.01);
@@ -314,22 +535,25 @@ async function generateSignal(candles, symbol, sentimentData) {
   let sl = calculateDynamicSL(signalType, price, atr, liquidityMap, obDetector, gapDetector);
 
   const minSLDist = atr * 2.0;
-  if (signalType === 'LONG') {
-    if (sl > (price - minSLDist)) sl = price - minSLDist;
-  } else {
-    if (sl < (price + minSLDist)) sl = price + minSLDist;
-  }
+  if (signalType === 'LONG') { if (sl > (price - minSLDist)) sl = price - minSLDist; }
+  else { if (sl < (price + minSLDist)) sl = price + minSLDist; }
 
   const slPercent = Math.abs((price - sl) / price * 100);
   const tpPercent = Math.abs((tp - price) / price * 100);
   const rr = tpPercent / slPercent;
 
-  if (rr < 1.3) return null;
+  if (rr < 1.3) {
+    console.log(`[RISK ⚠️] ${symbol} RR bajo (1:${rr.toFixed(2)})`);
+    return null;
+  }
 
   let finalScore = Math.max(strategySignals.long, strategySignals.short);
   let reasons = strategySignals.reasons.join(' | ');
 
-  if (finalScore < config.minSignalScore) return null;
+  if (finalScore < config.minSignalScore) {
+    console.log(`[SCORE 📉] ${symbol} Score insuficiente (${finalScore.toFixed(0)} < ${config.minSignalScore})`);
+    return null;
+  }
 
   // ========== BONUS POR FAIR VALUE GAP (FVG) ACTIVO ==========
   const gapData = gapDetector.getActiveGaps();
@@ -396,6 +620,21 @@ async function generateSignal(candles, symbol, sentimentData) {
   // ========== DECISIÓN DEL AGENTE RL ==========
   const action = rlAgent.act(state);
   lastAction = action;
+
+  // ========== RL LOGGING (AUDIT) ==========
+  if (!process.env.VERCEL) {
+    try {
+      const auditLine = JSON.stringify({
+        timestamp: new Date().toISOString(),
+        symbol,
+        action,
+        signalType,
+        score: finalScore,
+        state: state.slice(0, 5) // Log partial state to save space
+      }) + '\n';
+      fs.appendFileSync('rl_audit_log.jsonl', auditLine);
+    } catch (e) { }
+  }
 
   // ========== RL: APRENDIZAJE CONTINUO (SIM) ==========
   let simReward = 0;
